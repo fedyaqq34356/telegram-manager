@@ -213,3 +213,29 @@ def parser_delay_keyboard(lang: str) -> InlineKeyboardMarkup:
     builder.add(InlineKeyboardButton(text="✏️ Своё время (часы)", callback_data="parser_delay:custom"))
     builder.adjust(2, 2, 1)
     return builder.as_markup()
+
+def crypto_asset_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    assets = [
+        ("USDT", "💵 USDT"),
+        ("TON", "💎 TON"),
+        ("BTC", "₿ BTC"),
+        ("ETH", "⟠ ETH"),
+        ("LTC", "Ł LTC"),
+        ("BNB", "🔶 BNB"),
+        ("TRX", "⚡ TRX"),
+    ]
+    for code, label in assets:
+        builder.add(InlineKeyboardButton(text=label, callback_data=f"crypto_asset:{code}"))
+    builder.adjust(3)
+    return builder.as_markup()
+
+
+def check_crypto_keyboard(lang: str, pay_url: str, payment_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        InlineKeyboardButton(text="💳 Оплатить через CryptoBot", url=pay_url),
+        InlineKeyboardButton(text="🔍 Проверить оплату", callback_data=f"crypto_check:{payment_id}"),
+    )
+    builder.adjust(1)
+    return builder.as_markup()

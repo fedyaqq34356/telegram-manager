@@ -485,3 +485,10 @@ async def get_source_channels_for_parser() -> list:
     async with get_db() as db:
         cursor = await db.execute("SELECT * FROM user_channels")
         return await cursor.fetchall()
+
+async def get_pending_crypto_invoices() -> list:
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT * FROM payments WHERE method = 'crypto_auto' AND status = 'pending' AND tx_hash IS NOT NULL"
+        )
+        return await cursor.fetchall()

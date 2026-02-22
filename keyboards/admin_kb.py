@@ -11,7 +11,6 @@ def admin_menu_keyboard() -> ReplyKeyboardMarkup:
         KeyboardButton(text="👤 Кастомная подписка"),
         KeyboardButton(text="💳 Платежи (крипто)"),
         KeyboardButton(text="🤖 Аккаунты Telethon"),
-        KeyboardButton(text="💰 Крипто кошельки"),
         KeyboardButton(text="⚙️ Настройки бота"),
         KeyboardButton(text="📋 Тарифы"),
     )
@@ -49,17 +48,6 @@ def telethon_accounts_keyboard(accounts: list) -> InlineKeyboardMarkup:
             callback_data=f"telethon:remove:{acc['name']}"
         ))
     builder.add(InlineKeyboardButton(text="➕ Добавить аккаунт", callback_data="telethon:add"))
-    builder.adjust(1)
-    return builder.as_markup()
-
-def wallets_admin_keyboard(wallets: list) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for w in wallets:
-        builder.add(InlineKeyboardButton(
-            text=f"💰 {w['currency']} — {w['wallet_address'][:16]}...",
-            callback_data=f"wallet:remove:{w['id']}"
-        ))
-    builder.add(InlineKeyboardButton(text="➕ Добавить кошелёк", callback_data="wallet:add"))
     builder.adjust(1)
     return builder.as_markup()
 

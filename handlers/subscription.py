@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, LabeledPrice, PreCheckoutQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database.db import (
@@ -9,31 +9,36 @@ from database.db import (
 from locales import t
 from keyboards.main_kb import (
     plans_keyboard, period_keyboard, payment_method_keyboard,
-    crypto_wallets_keyboard, check_payment_keyboard, stars_channels_keyboard
+    crypto_asset_keyboard, stars_channels_keyboard, check_crypto_keyboard
 )
 
 router = Router()
+
+SUPPORTED_ASSETS = ["USDT", "TON", "BTC", "ETH", "LTC", "BNB", "TRX"]
+
 
 class SubStates(StatesGroup):
     choosing_plan = State()
     choosing_period = State()
     choosing_payment = State()
+    choosing_crypto_asset = State()
     choosing_stars_channels = State()
-    waiting_tx_hash = State()
+
 
 @router.message(F.text.in_(["💳 Купить подписку", "💳 Buy Subscription"]))
 async def buy_sub_start(message: Message, state: FSMContext, lang: str):
     sub = await get_active_subscription(message.from_user.id)
     if sub:
-        expires = sub['expires_at'][:16].replace('T', ' ')
+        expires = sub["expires_at"][:16].replace("T", " ")
         await message.answer(
-            t(lang, "sub_active", expires=expires, plan=sub['plan']),
-            parse_mode='HTML'
+            t(lang, "sub_active", expires=expires, plan=sub["plan"]),
+            parse_mode="HTML"
         )
         return
     plans = await get_subscription_plans()
     await state.set_state(SubStates.choosing_plan)
     await message.answer(t(lang, "choose_plan"), reply_markup=plans_keyboard(lang, plans))
+
 
 @router.callback_query(F.data.startswith("plan:"), SubStates.choosing_plan)
 async def plan_chosen(callback: CallbackQuery, state: FSMContext, lang: str):
@@ -42,7 +47,7 @@ async def plan_chosen(callback: CallbackQuery, state: FSMContext, lang: str):
     plan_name = parts[2]
     count = int(parts[3])
     plans = await get_subscription_plans()
-    plan = next((p for p in plans if p['id'] == plan_id), None)
+    plan = next((p for p in plans if p["id"] == plan_id), None)
     if not plan:
         await callback.answer("❌ Тариф не найден", show_alert=True)
         return
@@ -53,6 +58,7 @@ async def plan_chosen(callback: CallbackQuery, state: FSMContext, lang: str):
         reply_markup=period_keyboard(lang, f"{plan_id}:{plan_name}:{count}", dict(plan))
     )
 
+
 @router.callback_query(F.data.startswith("period:"), SubStates.choosing_period)
 async def period_chosen(callback: CallbackQuery, state: FSMContext, lang: str):
     parts = callback.data.split(":")
@@ -61,80 +67,118 @@ async def period_chosen(callback: CallbackQuery, state: FSMContext, lang: str):
     data = await state.get_data()
     await state.update_data(months=months, price=price)
     await state.set_state(SubStates.choosing_payment)
-    text = t(lang, "sub_info", plan=data['plan_name'], count=data['count'], months=months, price=price)
+    text = t(lang, "sub_info", plan=data["plan_name"], count=data["count"], months=months, price=price)
     await callback.message.edit_text(
         f"{text}\n\n{t(lang, 'choose_payment')}",
         reply_markup=payment_method_keyboard(lang),
-        parse_mode='HTML'
+        parse_mode="HTML"
     )
+
 
 @router.callback_query(F.data == "payment:crypto", SubStates.choosing_payment)
 async def payment_crypto_chosen(callback: CallbackQuery, state: FSMContext, lang: str):
-    wallets = await get_crypto_wallets()
-    if not wallets:
-        await callback.answer("❌ Нет доступных кошельков для оплаты", show_alert=True)
-        return
-    await callback.message.edit_text(t(lang, "choose_crypto"), reply_markup=crypto_wallets_keyboard(wallets, prefix="pay_wallet"))
-
-@router.callback_query(F.data.startswith("pay_wallet:"))
-async def wallet_chosen(callback: CallbackQuery, state: FSMContext, lang: str):
-    wallet_id = int(callback.data.split(":")[1])
-    wallets = await get_crypto_wallets()
-    wallet = next((w for w in wallets if w['id'] == wallet_id), None)
-    if not wallet:
-        await callback.answer("❌ Кошелёк не найден", show_alert=True)
-        return
-    data = await state.get_data()
-    payment_id = await create_payment(
-        callback.from_user.id, str(data['price']), wallet['currency'],
-        'crypto_manual', 'main', data['plan_name'], data['months']
-    )
-    await state.update_data(payment_id=payment_id)
-    await state.set_state(SubStates.waiting_tx_hash)
-    await callback.message.edit_text(
-        t(lang, "crypto_payment_info", currency=wallet['currency'], address=wallet['wallet_address'], amount=data['price']),
-        parse_mode='HTML'
-    )
-    await callback.message.answer(t(lang, "send_tx_hash"))
-
-@router.message(SubStates.waiting_tx_hash)
-async def process_tx_hash(message: Message, state: FSMContext, lang: str):
-    tx_hash = message.text.strip()
-    data = await state.get_data()
-    payment_id = data.get('payment_id')
-    await update_payment_status(payment_id, 'pending_review', tx_hash)
-    payment = await get_payment(payment_id)
     from config import settings
-    for admin_id in settings.ADMIN_IDS:
-        try:
-            from keyboards.admin_kb import approve_payment_keyboard
-            text = (
-                f"💳 <b>Новый платёж</b>\n\n"
-                f"👤 ID: <code>{message.from_user.id}</code>\n"
-                f"📛 Username: @{message.from_user.username or 'нет'}\n"
-                f"💬 Имя: {message.from_user.full_name}\n"
-                f"💰 Сумма: {payment['amount']} {payment['currency']}\n"
-                f"📋 Тариф: {payment['plan']}\n"
-                f"📅 Период: {payment['months']} мес.\n"
-                f"🔗 Хеш: <code>{tx_hash}</code>"
-            )
-            await message.bot.send_message(admin_id, text, reply_markup=approve_payment_keyboard(payment_id), parse_mode='HTML')
-        except Exception:
-            pass
+    if not settings.CRYPTO_PAY_TOKEN:
+        await callback.answer("❌ Крипто-оплата не настроена. Обратитесь к администратору.", show_alert=True)
+        return
+    await state.set_state(SubStates.choosing_crypto_asset)
+    await callback.message.edit_text(
+        "₿ <b>Выберите криптовалюту для оплаты:</b>",
+        reply_markup=crypto_asset_keyboard(),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("crypto_asset:"), SubStates.choosing_crypto_asset)
+async def crypto_asset_chosen(callback: CallbackQuery, state: FSMContext, lang: str):
+    asset = callback.data.split(":")[1]
+    data = await state.get_data()
+    price_usd = data["price"]
+    plan_name = data["plan_name"]
+    months = data["months"]
+
+    await callback.message.edit_text("⏳ Создаю счёт...")
+
+    from services.crypto_pay import create_invoice
+    invoice = await create_invoice(
+        asset=asset,
+        amount=price_usd,
+        description=f"Подписка {plan_name} на {months} мес.",
+        payload=f"sub_{callback.from_user.id}_{plan_name}_{months}"
+    )
+
+    if not invoice:
+        await callback.message.edit_text(
+            "❌ Не удалось создать счёт. Попробуйте позже или выберите другую валюту.",
+            reply_markup=crypto_asset_keyboard()
+        )
+        return
+
+    invoice_id = invoice["invoice_id"]
+    pay_url = invoice["bot_invoice_url"]
+
+    payment_id = await create_payment(
+        callback.from_user.id, str(price_usd), asset,
+        "crypto_auto", "main", plan_name, months
+    )
+    await update_payment_status(payment_id, "pending", str(invoice_id))
+
     await state.clear()
-    await message.answer(t(lang, "payment_sent_admin"))
+
+    await callback.message.edit_text(
+        f"₿ <b>Счёт создан!</b>\n\n"
+        f"Тариф: <b>{plan_name}</b> на {months} мес.\n"
+        f"Сумма: <b>${price_usd} {asset}</b>\n\n"
+        f"Нажмите кнопку ниже для оплаты через CryptoBot.\n"
+        f"После оплаты подписка активируется <b>автоматически</b> в течение ~30 секунд.",
+        reply_markup=check_crypto_keyboard(lang, pay_url, payment_id),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("crypto_check:"))
+async def manual_check_crypto(callback: CallbackQuery, lang: str):
+    payment_id = int(callback.data.split(":")[1])
+    payment = await get_payment(payment_id)
+    if not payment:
+        await callback.answer("❌ Платёж не найден", show_alert=True)
+        return
+    if payment["status"] == "approved":
+        await callback.answer("✅ Подписка уже активирована!", show_alert=True)
+        return
+
+    invoice_id = payment["tx_hash"]
+    if not invoice_id:
+        await callback.answer("❌ Ошибка: invoice не найден", show_alert=True)
+        return
+
+    from services.crypto_pay import check_invoice_paid
+    paid = await check_invoice_paid(int(invoice_id))
+    if paid:
+        await update_payment_status(payment_id, "approved")
+        await create_subscription(
+            callback.from_user.id, "main", payment["plan"],
+            5, 5, payment["months"]
+        )
+        await callback.message.edit_text(
+            "✅ <b>Оплата подтверждена!</b>\n\nПодписка активирована.",
+            parse_mode="HTML"
+        )
+    else:
+        await callback.answer("⏳ Оплата ещё не поступила. Попробуйте через минуту.", show_alert=True)
+
 
 @router.callback_query(F.data == "payment:stars", SubStates.choosing_payment)
 async def payment_stars_chosen(callback: CallbackQuery, state: FSMContext, lang: str):
-    price_per_channel = int(await get_setting('stars_per_channel', '100'))
+    price_per_channel = int(await get_setting("stars_per_channel", "100"))
     await state.set_state(SubStates.choosing_stars_channels)
     await callback.message.edit_text(
         f"⭐ <b>Выберите количество каналов</b>\n\n"
-        f"Стоимость: {price_per_channel} ⭐ за канал\n\n"
-        f"Реакции будут ставиться на посты в выбранном количестве ваших каналов одновременно.",
+        f"Стоимость: {price_per_channel} ⭐ за канал",
         reply_markup=stars_channels_keyboard(lang, price_per_channel),
-        parse_mode='HTML'
+        parse_mode="HTML"
     )
+
 
 @router.callback_query(F.data.startswith("stars_channels:"), SubStates.choosing_stars_channels)
 async def stars_channels_chosen(callback: CallbackQuery, state: FSMContext, lang: str):
@@ -142,52 +186,51 @@ async def stars_channels_chosen(callback: CallbackQuery, state: FSMContext, lang
     channels_count = int(parts[1])
     stars_amount = int(parts[2])
     data = await state.get_data()
+    plan_name = data.get("plan_name", "Подписка")
+    months = data.get("months", 1)
+
     payment_id = await create_payment(
-        callback.from_user.id, str(stars_amount), 'stars',
-        'stars', 'main', data.get('plan_name', ''), data.get('months', 1)
+        callback.from_user.id, str(stars_amount), "XTR",
+        "stars", "main", plan_name, months
     )
     await state.update_data(payment_id=payment_id, stars_channels_count=channels_count)
-    from config import settings
-    invite_link = settings.STARS_CHANNEL_INVITE
-    await callback.message.edit_text(
-        f"⭐ <b>Оплата звёздами</b>\n\n"
-        f"Каналов: <b>{channels_count}</b>\n"
-        f"Сумма: <b>{stars_amount} ⭐</b>\n\n"
-        f"Подпишитесь на канал по ссылке:\n{invite_link}\n\n"
-        f"После оплаты нажмите <b>«{t(lang, 'check_payment')}»</b>.",
-        reply_markup=check_payment_keyboard(lang),
-        parse_mode='HTML'
+    await state.clear()
+
+    await callback.bot.send_invoice(
+        chat_id=callback.from_user.id,
+        title=f"Подписка {plan_name}",
+        description=f"{channels_count} канал(ов) на {months} мес.",
+        payload=f"stars_{payment_id}_{channels_count}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label=plan_name, amount=stars_amount)]
     )
+    await callback.answer()
 
-@router.callback_query(F.data == "payment:check")
-async def check_stars_payment(callback: CallbackQuery, state: FSMContext, lang: str):
-    from config import settings
-    try:
-        member = await callback.bot.get_chat_member(settings.STARS_CHANNEL_ID, callback.from_user.id)
-        is_member = member.status not in ('left', 'kicked', 'banned')
-    except Exception:
-        is_member = False
 
-    if is_member:
-        data = await state.get_data()
-        payment_id = data.get('payment_id')
-        channels_count = data.get('stars_channels_count', 1)
-        if payment_id:
-            payment = await get_payment(payment_id)
-            await create_subscription(
-                callback.from_user.id, 'main', payment['plan'],
-                5, 5, payment['months'], channels_count
-            )
-            await update_payment_status(payment_id, 'approved')
-        try:
-            await callback.bot.ban_chat_member(settings.STARS_CHANNEL_ID, callback.from_user.id)
-            await callback.bot.unban_chat_member(settings.STARS_CHANNEL_ID, callback.from_user.id)
-        except Exception:
-            pass
-        await state.clear()
-        await callback.message.edit_text(
-            f"✅ <b>Оплата подтверждена!</b>\n\nПодписка активирована.\nДоступно каналов: <b>{channels_count}</b>",
-            parse_mode='HTML'
+@router.pre_checkout_query()
+async def pre_checkout_handler(query: PreCheckoutQuery):
+    await query.answer(ok=True)
+
+
+@router.message(F.successful_payment)
+async def successful_payment_handler(message: Message):
+    payload = message.successful_payment.invoice_payload
+    parts = payload.split("_")
+    if parts[0] != "stars" or len(parts) < 3:
+        return
+    payment_id = int(parts[1])
+    channels_count = int(parts[2])
+
+    payment = await get_payment(payment_id)
+    if payment:
+        await create_subscription(
+            message.from_user.id, "main", payment["plan"],
+            5, 5, payment["months"], channels_count
         )
-    else:
-        await callback.answer(t(lang, "payment_not_found"), show_alert=True)
+        await update_payment_status(payment_id, "approved")
+
+    await message.answer(
+        f"✅ <b>Оплата прошла!</b>\n\nПодписка активирована.\nДоступно каналов: <b>{channels_count}</b>",
+        parse_mode="HTML"
+    )

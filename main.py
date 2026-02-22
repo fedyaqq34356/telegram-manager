@@ -9,6 +9,7 @@ from database.db import init_db
 from handlers import start, channels, reactions, subscription, circles, posting, admin, post_parser
 from services.reaction_worker import ReactionWorker
 from services.scheduler import Scheduler
+from services.crypto_poller import CryptoPayPoller
 from middlewares.language import LanguageMiddleware
 
 async def main():
@@ -38,11 +39,13 @@ async def main():
 
     reaction_worker = ReactionWorker(bot)
     scheduler = Scheduler(bot)
+    crypto_poller = CryptoPayPoller(bot)
 
     await asyncio.gather(
         dp.start_polling(bot, drop_pending_updates=True),
         reaction_worker.run(),
-        scheduler.run()
+        scheduler.run(),
+        crypto_poller.run(),
     )
 
 if __name__ == '__main__':

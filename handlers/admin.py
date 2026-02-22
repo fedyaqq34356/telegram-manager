@@ -9,7 +9,6 @@ from config import settings
 from database.db import (
     get_stats, get_all_users, get_setting, set_setting,
     get_telethon_accounts, add_telethon_account, remove_telethon_account,
-    get_crypto_wallets, add_crypto_wallet, remove_crypto_wallet,
     get_payment, update_payment_status, create_subscription,
     get_subscription_plans, get_pending_crypto_payments,
     get_user, get_users_with_subscription, get_users_without_demo,
@@ -19,7 +18,7 @@ from database.db import (
 from keyboards.admin_kb import (
     admin_menu_keyboard, approve_payment_keyboard,
     broadcast_filter_keyboard, telethon_accounts_keyboard,
-    wallets_admin_keyboard, grant_sub_period_keyboard
+    grant_sub_period_keyboard
 )
 from keyboards.main_kb import plans_keyboard
 
@@ -37,8 +36,6 @@ class AdminStates(StatesGroup):
     telethon_phone = State()
     telethon_code = State()
     telethon_password = State()
-    wallet_add_currency = State()
-    wallet_add_address = State()
     grant_user_id = State()
     grant_plan = State()
     grant_period = State()
@@ -334,42 +331,6 @@ async def telethon_remove(callback: CallbackQuery):
     await callback.answer(f"✅ Аккаунт {name} удалён")
     accounts = await get_telethon_accounts()
     await callback.message.edit_reply_markup(reply_markup=telethon_accounts_keyboard(accounts))
-
-@router.message(F.text == "💰 Крипто кошельки")
-async def wallets_menu(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        return
-    wallets = await get_crypto_wallets()
-    await message.answer(
-        f"💰 Крипто кошельки ({len(wallets)}):",
-        reply_markup=wallets_admin_keyboard(wallets)
-    )
-
-@router.callback_query(F.data == "wallet:add")
-async def wallet_add_start(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(AdminStates.wallet_add_currency)
-    await callback.message.answer("💱 Введите название криптовалюты (например: USDT, BTC, TON):")
-
-@router.message(AdminStates.wallet_add_currency)
-async def wallet_add_currency(message: Message, state: FSMContext):
-    await state.update_data(wallet_currency=message.text.strip().upper())
-    await state.set_state(AdminStates.wallet_add_address)
-    await message.answer("🏦 Введите адрес кошелька:")
-
-@router.message(AdminStates.wallet_add_address)
-async def wallet_add_address(message: Message, state: FSMContext):
-    data = await state.get_data()
-    await add_crypto_wallet(data['wallet_currency'], message.text.strip())
-    await state.clear()
-    await message.answer(f"✅ Кошелёк {data['wallet_currency']} добавлен!")
-
-@router.callback_query(F.data.startswith("wallet:remove:"))
-async def wallet_remove(callback: CallbackQuery):
-    wallet_id = int(callback.data.split(":")[2])
-    await remove_crypto_wallet(wallet_id)
-    await callback.answer("✅ Кошелёк удалён")
-    wallets = await get_crypto_wallets()
-    await callback.message.edit_reply_markup(reply_markup=wallets_admin_keyboard(wallets))
 
 @router.message(F.text == "💳 Платежи (крипто)")
 async def pending_payments(message: Message, bot: Bot):
