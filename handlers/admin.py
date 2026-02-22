@@ -114,6 +114,7 @@ async def broadcast_filter_chosen(callback: CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.broadcast_content)
 async def broadcast_content(message: Message, state: FSMContext, bot: Bot):
+    from services.user_bot import get_bot_for_user
     data = await state.get_data()
     filter_type = data.get('broadcast_filter', 'all')
     
@@ -164,10 +165,11 @@ async def broadcast_content(message: Message, state: FSMContext, bot: Bot):
     failed = 0
     for user in users:
         try:
+            send_bot = await get_bot_for_user(user['tg_id']) or bot
             if photo_id:
-                await bot.send_photo(user['tg_id'], photo_id, caption=text, reply_markup=markup)
+                await send_bot.send_photo(user['tg_id'], photo_id, caption=text, reply_markup=markup)
             else:
-                await bot.send_message(user['tg_id'], text, reply_markup=markup)
+                await send_bot.send_message(user['tg_id'], text, reply_markup=markup)
             sent += 1
         except Exception:
             failed += 1
@@ -209,6 +211,7 @@ async def grant_plan_chosen(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("grant_period:"), AdminStates.grant_period)
 async def grant_period_chosen(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    from services.user_bot import get_bot_for_user
     months = int(callback.data.split(":")[1])
     data = await state.get_data()
     user_id = data['grant_user_id']
@@ -220,7 +223,8 @@ async def grant_period_chosen(callback: CallbackQuery, state: FSMContext, bot: B
     await callback.message.edit_text(f"✅ Подписка выдана пользователю {user_id}")
     
     try:
-        await bot.send_message(user_id, f"🎁 Вам выдана подписка {plan} на {months} мес.!")
+        send_bot = await get_bot_for_user(user_id) or bot
+        await send_bot.send_message(user_id, f"🎁 Вам выдана подписка {plan} на {months} мес.!")
     except Exception:
         pass
 
@@ -353,6 +357,7 @@ async def pending_payments(message: Message, bot: Bot):
 
 @router.callback_query(F.data.startswith("admin_pay:"))
 async def admin_payment_action(callback: CallbackQuery, bot: Bot):
+    from services.user_bot import get_bot_for_user
     parts = callback.data.split(":")
     action = parts[1]
     payment_id = int(parts[2])
@@ -373,14 +378,16 @@ async def admin_payment_action(callback: CallbackQuery, bot: Bot):
             user = await get_user(payment['user_id'])
             lang = user['language'] if user else 'ru'
             from locales import t
-            await bot.send_message(payment['user_id'], t(lang, "payment_verified"))
+            send_bot = await get_bot_for_user(payment['user_id']) or bot
+            await send_bot.send_message(payment['user_id'], t(lang, "payment_verified"))
         except Exception:
             pass
     elif action == "reject":
         await update_payment_status(payment_id, 'rejected')
         await callback.message.edit_text(f"❌ Платёж #{payment_id} отклонён")
         try:
-            await bot.send_message(payment['user_id'], "❌ Ваш платёж был отклонён. Обратитесь в поддержку.")
+            send_bot = await get_bot_for_user(payment['user_id']) or bot
+            await send_bot.send_message(payment['user_id'], "❌ Ваш платёж был отклонён. Обратитесь в поддержку.")
         except Exception:
             pass
 
@@ -508,6 +515,7 @@ async def custom_sub_price(message: Message, state: FSMContext):
 
 @router.message(AdminStates.custom_sub_months)
 async def custom_sub_months(message: Message, state: FSMContext, bot: Bot):
+    from services.user_bot import get_bot_for_user
     try:
         months = int(message.text.strip())
         if months < 1:
@@ -550,6 +558,7 @@ async def custom_sub_months(message: Message, state: FSMContext, bot: Bot):
             f"🎯 Reactions: {reactions} | Views: {views}\n"
             f"📅 Duration: {months} mo."
         )
-        await bot.send_message(user_id, msg, parse_mode='HTML')
+        send_bot = await get_bot_for_user(user_id) or bot
+        await send_bot.send_message(user_id, msg, parse_mode='HTML')
     except Exception:
         pass

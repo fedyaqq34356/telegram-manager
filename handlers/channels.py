@@ -6,7 +6,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from database.db import (
     add_user_channel, get_user_channels, remove_user_channel,
-    get_channel, get_telethon_accounts
+    get_channel, get_telethon_accounts,
+    set_user_custom_token, get_user_custom_token
 )
 from locales import t
 from keyboards.main_kb import (
@@ -21,8 +22,6 @@ class ChannelStates(StatesGroup):
     waiting_token = State()
     waiting_channel_added = State()
     waiting_accounts_added = State()
-
-_pending_channel_setup: dict[int, dict] = {}
 
 @router.message(F.text.in_(["🚀 Запустить", "🚀 Launch"]))
 async def launch_handler(message: Message, lang: str):
@@ -65,14 +64,20 @@ async def process_bot_token(message: Message, state: FSMContext, lang: str, bot:
                 if not data.get('ok'):
                     await message.answer(t(lang, "invalid_token"))
                     return
+                custom_bot_username = data['result']['username']
     except Exception:
         await message.answer(t(lang, "invalid_token"))
         return
 
-    await state.update_data(custom_token=token)
+    await set_user_custom_token(message.from_user.id, token)
+
+    from services import user_bot as user_bot_service
+    await user_bot_service.start_custom_bot(token)
+
+    await state.update_data(custom_token=token, custom_bot_username=custom_bot_username)
     await state.set_state(ChannelStates.waiting_channel_added)
     await message.answer(
-        t(lang, "token_accepted"),
+        t(lang, "token_accepted", bot_username=custom_bot_username),
         reply_markup=done_keyboard(lang, "channel:done_add"),
         parse_mode='HTML'
     )
@@ -102,7 +107,6 @@ async def channel_done_add(callback: CallbackQuery, state: FSMContext, lang: str
 
 @router.callback_query(F.data == "channel:accounts_done")
 async def accounts_done(callback: CallbackQuery, state: FSMContext, lang: str):
-    data = await state.get_data()
     await state.clear()
     await callback.message.answer(t(lang, "all_set"))
 
@@ -114,7 +118,8 @@ async def bot_added_to_channel(event: ChatMemberUpdated, bot: Bot):
             channel_id = event.chat.id
             channel_title = event.chat.title or ''
             channel_username = event.chat.username or ''
-            await add_user_channel(user_id, channel_id, channel_title, channel_username)
+            custom_token = await get_user_custom_token(user_id)
+            await add_user_channel(user_id, channel_id, channel_title, channel_username, custom_token)
 
 @router.callback_query(F.data == "channel:list")
 async def channels_list(callback: CallbackQuery, lang: str):

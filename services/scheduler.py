@@ -22,9 +22,12 @@ class Scheduler:
             await asyncio.sleep(30)
 
     async def _process_pending_posts(self):
+        from services.user_bot import get_bot_for_user
         posts = await get_pending_posts()
         for post in posts:
             try:
+                send_bot = await get_bot_for_user(post['user_id']) or self.bot
+
                 buttons_data = json.loads(post['buttons'] or '[]')
                 markup = None
                 if buttons_data:
@@ -32,26 +35,24 @@ class Scheduler:
                     for btn in buttons_data:
                         if '|' in btn:
                             parts = btn.split('|', 1)
-                            name = parts[0].strip()
-                            url = parts[1].strip()
-                            builder.add(InlineKeyboardButton(text=name, url=url))
+                            builder.add(InlineKeyboardButton(text=parts[0].strip(), url=parts[1].strip()))
                     builder.adjust(1)
                     markup = builder.as_markup()
 
                 if post['media_type'] == 'photo':
-                    await self.bot.send_photo(
+                    await send_bot.send_photo(
                         post['channel_id'], post['media_file_id'],
                         caption=post['text_content'], reply_markup=markup
                     )
                 elif post['media_type'] == 'video':
-                    await self.bot.send_video(
+                    await send_bot.send_video(
                         post['channel_id'], post['media_file_id'],
                         caption=post['text_content'], reply_markup=markup
                     )
                 elif post['media_type'] == 'video_note':
-                    await self.bot.send_video_note(post['channel_id'], post['media_file_id'])
+                    await send_bot.send_video_note(post['channel_id'], post['media_file_id'])
                 else:
-                    await self.bot.send_message(
+                    await send_bot.send_message(
                         post['channel_id'], post['text_content'] or '',
                         reply_markup=markup
                     )

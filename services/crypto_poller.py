@@ -22,6 +22,7 @@ class CryptoPayPoller:
             await asyncio.sleep(30)
 
     async def _check_invoices(self):
+        from services.user_bot import get_bot_for_user
         payments = await get_pending_crypto_invoices()
         for payment in payments:
             invoice_id = payment["tx_hash"]
@@ -37,7 +38,8 @@ class CryptoPayPoller:
                         5, 5, payment["months"]
                     )
                     try:
-                        await self.bot.send_message(
+                        send_bot = await get_bot_for_user(payment["user_id"]) or self.bot
+                        await send_bot.send_message(
                             payment["user_id"],
                             "✅ <b>Оплата подтверждена!</b>\n\nПодписка активирована.",
                             parse_mode="HTML"

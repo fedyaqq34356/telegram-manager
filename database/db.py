@@ -25,7 +25,8 @@ async def init_db():
                 language TEXT DEFAULT 'ru',
                 created_at TEXT DEFAULT (datetime('now')),
                 demo_activated INTEGER DEFAULT 0,
-                demo_expires_at TEXT
+                demo_expires_at TEXT,
+                custom_bot_token TEXT
             );
 
             CREATE TABLE IF NOT EXISTS subscriptions (
@@ -166,6 +167,13 @@ async def init_db():
         except Exception:
             pass
 
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN custom_bot_token TEXT")
+            await db.commit()
+        except Exception:
+            pass
+
 async def get_user(tg_id: int) -> aiosqlite.Row | None:
     async with get_db() as db:
         cursor = await db.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,))
@@ -183,6 +191,24 @@ async def update_user_language(tg_id: int, language: str):
     async with get_db() as db:
         await db.execute("UPDATE users SET language = ? WHERE tg_id = ?", (language, tg_id))
         await db.commit()
+
+async def get_user_custom_token(tg_id: int) -> str | None:
+    async with get_db() as db:
+        cursor = await db.execute("SELECT custom_bot_token FROM users WHERE tg_id = ?", (tg_id,))
+        row = await cursor.fetchone()
+        return row['custom_bot_token'] if row else None
+
+async def set_user_custom_token(tg_id: int, token: str):
+    async with get_db() as db:
+        await db.execute("UPDATE users SET custom_bot_token = ? WHERE tg_id = ?", (token, tg_id))
+        await db.commit()
+
+async def get_users_with_custom_bots() -> list:
+    async with get_db() as db:
+        cursor = await db.execute(
+            "SELECT tg_id, custom_bot_token FROM users WHERE custom_bot_token IS NOT NULL AND custom_bot_token != ''"
+        )
+        return await cursor.fetchall()
 
 async def activate_demo(tg_id: int, hours: int = 24):
     expires = (datetime.now() + timedelta(hours=hours)).isoformat()
