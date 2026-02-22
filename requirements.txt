@@ -1,0 +1,9 @@
+aiogram
+telethon
+aiosqlite
+aiohttp
+python-dotenv
+cryptg
+Pillow
+moviepy
+apscheduler
